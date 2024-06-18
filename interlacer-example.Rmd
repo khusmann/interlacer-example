@@ -1,0 +1,275 @@
+---
+title: "Interlacer Example"
+author: "Kyle Husmann"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Trying out {interlacer}
+
+```{r}
+library(tidyverse)
+library(interlacer)
+
+int_df <- read_interlaced_csv(
+  "w1_mathproj_stu_svy_raw.csv",
+  na = c("refused", "skipped")
+)
+
+na_levels(int_df$math3)
+
+# See if the labelled missing are recognized in sum and friends (yes)
+
+int_df %>%
+  summarize(sum = sum(math3, na.rm = TRUE))
+
+int_df %>%
+  summarize(sum = mean(math3, na.rm = TRUE))
+
+int_df %>%
+  summarize(sum = sd(math3, na.rm = TRUE))
+
+int_df %>%
+  mutate(foo = math3 + math4)
+
+int_df %>%
+  rowwise() %>%
+  mutate(
+    mean_math = mean(c_across(starts_with("math")), na.rm=TRUE) 
+  )
+
+# Also recognized in filter
+
+int_df %>%
+  filter(is.na(math3))
+
+# filter also uses labels by default
+
+int_df %>%
+  filter(math3 == na("skipped"))
+```
+
+Here's some things you can't do in labelled:
+
+```{r}
+# We can add missing values to types other than character and integer.
+# interlacer works for ALL possible R types.
+
+# For example, let's replace the dates for a given stu_id with a missing value:
+
+(int_df_date <- int_df %>%
+  mutate(
+    svy_date = if_else(stu_id == 1347, na("technical error"), svy_date)
+  ))
+
+# Note that the missing reason channel AUTOMATICALLY adds "technical error"
+# to its list of missing values:
+
+na_levels(int_df_date$svy_date)
+
+# Also notice that svy_date is still a date type
+
+is.Date(int_df_date$svy_date)
+
+# This means when we plot it, the axis will show up as a date. Notice the X axis!
+
+int_df_date %>%
+  ggplot(aes(svy_date, math1)) +
+  geom_point()
+
+# If we were using labelled, we'd have to turn everything into character vectors,
+# and we'd lose all the date features!
+```
+
+Let's say now that we want to code our data to be compatible with SPSS.
+We'll do two things:
+
+1) Code gender to f = 1, m = 2, and
+2) Code skipped = -99, refused = -98
+
+```{r}
+# Because values and missing reasons are separate channels, it's easy to do
+# target them separately in tidy pipelines
+
+(int_df_coded <- int_df %>%
+  mutate(
+    gender = map_value_channel(gender, \(v) recode(v, f = 1, m = 2)),
+    across_na_channels(everything(), \(v) recode(v, skipped = -99, refused = -98)),
+  )
+)
+
+# Notice that because the mutations occur *within* the value and missing reason
+# channels, there's no need to set -99 and -98 as missing values after, as
+# you would with labelled. They've just been transformed into numeric values.
+
+int_df_coded %>%
+  summarize(sum = sum(math3, na.rm = TRUE))
+
+# We get the same result as before!
+
+# Note that because this missing reason channel is now numeric, it doesn't
+# have factor levels:
+na_levels(int_df_coded$math3)
+```
+
+## Comparing to previous workflow with labelled
+
+```{r}
+library(labelled)
+
+lab_df <- read_csv("w1_mathproj_stu_svy_raw.csv")
+```
+
+```{r, eval = FALSE}
+# Can assign skipped as missing but this variable will remain character
+# You receive an error when you try to convert to numeric
+
+lab_df_coded <- lab_df %>%
+  set_na_values(math3 = "skipped") %>%
+  mutate(math3 = as.numeric(math3))
+```
+
+```{r}
+# Instead you need to use numeric missing values (e.g., -99 = skipped)
+
+lab_df_coded <- lab_df %>%
+  mutate(
+    # This is annoying -- you have to convert everything to character first, because
+    # some math cols are dbl, and some are character
+    across(everything(), as.character),
+    # Also here when I recode, I have to use strings for the numeric values, because
+    # I'm still working in characters
+    across(everything(), \(v) recode(v, "skipped" = "-99", "refused" = "-98")),
+    gender = recode(gender, f = "1", m = "2"),
+    # Ok, now my coded columns are numeric
+    across(c(starts_with("math"), "gender"), as.numeric),
+    # But I have to convert my dates back to date types
+    svy_date = as.Date(svy_date)
+  ) %>%
+  set_na_values( # Is there no way to do this with across()?
+    math1 = c(-99, -98),
+    math2 = c(-99, -98),
+    math3 = c(-99, -98),
+    math4 = c(-99, -98),
+    gender = c(-99, -98),
+  ) %>%
+  set_value_labels( # Similarly, there's no across() compatibility here either?
+    math1 = c(skipped = -99, refused = -98),
+    math2 = c(skipped = -99, refused = -98),
+    math3 = c(skipped = -99, refused = -98),
+    math4 = c(skipped = -99, refused = -98),
+    gender = c(f = 1, m = 2, skipped = -99, refused = -98)
+  )
+
+na_values(lab_df_coded$math3)
+
+# But even then, the missing labelled values are not properly masked in computations:
+
+lab_df_coded %>%
+  summarize(sum = sum(math3, na.rm = TRUE))
+
+lab_df_coded %>%
+  summarize(sum = mean(math3, na.rm = TRUE))
+
+lab_df_coded %>%
+  summarize(sum = sd(math3, na.rm = TRUE))
+
+lab_df_coded %>%
+  mutate(foo = math3 + math4)
+
+lab_df_coded %>%
+  rowwise() %>%
+  mutate(
+    mean_math = mean(c_across(starts_with("math")), na.rm=TRUE) 
+  )
+
+# They are recognized in filter
+
+lab_df_coded %>%
+  filter(is.na(math3))
+
+# But by default, filtering for specific missing values requires referencing
+# their arbitrary
+# codes
+
+lab_df_coded %>%
+  filter(math3 == -99)
+
+# You can get the labels by converting to factor though!
+lab_df_coded %>%
+  filter(as_factor(math3) == "skipped")
+```
+
+Ok, let's write our coded data frame to a file, and load it with interlacer:
+
+```{r}
+write_csv(lab_df_coded, "w1_mathproj_stu_svy_coded.csv")
+
+(int_df_coded <- read_interlaced_csv(
+  "w1_mathproj_stu_svy_coded.csv",
+  na = c(-99, -98)
+))
+```
+
+Ok, this gives me a data frame with all my codes. But these are annoying to work with!
+If I want to filter by gender, for example, I write:
+
+```{r}
+int_df_coded %>%
+  filter(gender == 1)
+```
+
+Or by missing reason:
+
+```{r}
+int_df_coded %>%
+  filter(gender == na(-98))
+```
+
+With interlacer, you can load a coded dataset with `cfactor` types instead which
+allows you to work with labels by default, but then you have codes whenever you
+need them:
+
+```{r}
+(int_df_coded_cfct <- read_interlaced_csv(
+  "w1_mathproj_stu_svy_coded.csv",
+  col_types = x_cols(
+    gender = v_col_cfactor(codes = c(f = 1, m = 2))
+  ),
+  na = c(skipped = -99, refused = -98)
+))
+```
+
+now we can filter with labels:
+
+```{r}
+int_df_coded_cfct %>%
+  filter(gender == "f")
+
+int_df_coded_cfct %>%
+  filter(gender == na("refused"))
+```
+
+But we always can transform back into codes if we wish:
+
+```{r}
+# transform a single channel on a single column
+int_df_coded_cfct |>
+  mutate(
+    gender = map_value_channel(gender, as.codes)
+  )
+
+# Or transform all of them
+int_df_coded_cfct |>
+  mutate(
+    across_value_channels(where_value_channel(is.cfactor), as.codes),
+    across_na_channels(where_na_channel(is.cfactor), as.codes),
+  )
+```
+
+The goal with `cfactor` is to avoid magic numbers in our code by using labels
+instead. This can help reduce errors and make our code much more readable.
