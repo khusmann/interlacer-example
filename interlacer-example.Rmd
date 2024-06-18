@@ -89,10 +89,10 @@ Let's say now that we want to code our data to be compatible with SPSS.
 We'll do two things:
 
 1) Code gender to f = 1, m = 2, and
-2) Code skipped = -99, refused = -98
+2) Code all missing reasons: skipped = -99, refused = -98
 
 ```{r}
-# Because values and missing reasons are separate channels, it's easy to do
+# Because values and missing reasons are separate channels, it's easy to 
 # target them separately in tidy pipelines
 
 (int_df_coded <- int_df %>%
@@ -114,6 +114,10 @@ int_df_coded %>%
 # Note that because this missing reason channel is now numeric, it doesn't
 # have factor levels:
 na_levels(int_df_coded$math3)
+
+# Similarly, because gender is now a numeric, it doesn't have factor levels
+# either:
+levels(int_df_coded$gender)
 ```
 
 ## Comparing to previous workflow with labelled
@@ -135,6 +139,8 @@ lab_df_coded <- lab_df %>%
 
 ```{r}
 # Instead you need to use numeric missing values (e.g., -99 = skipped)
+
+# There may be a better way to do this with labelled -- if so, please let me know!
 
 lab_df_coded <- lab_df %>%
   mutate(
@@ -254,7 +260,7 @@ int_df_coded_cfct %>%
   filter(gender == na("refused"))
 ```
 
-But we always can transform back into codes if we wish:
+But we always can transform back into codes if you wish:
 
 ```{r}
 # transform a single channel on a single column
